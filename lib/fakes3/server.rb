@@ -51,6 +51,8 @@ module FakeS3
     def do_GET(request, response)
       s_req = normalize_request(request)
 
+      response["Access-Control-Allow-Origin"]="*"
+
       case s_req.type
       when 'LIST_BUCKETS'
         response.status = 200
