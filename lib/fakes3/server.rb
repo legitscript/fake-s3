@@ -371,15 +371,45 @@ module FakeS3
 
 
   class Server
-    def initialize(address,port,store,hostname)
+    def initialize(address,port,store,hostname, ssl_cert_path=nil, ssl_key_path=nil, extra_options={})
       @address = address
       @port = port
       @store = store
       @hostname = hostname
+
+      # Options to make initializer signature compatible with upstream source
+      # See https://github.com/jubos/fake-s3/blob/e4b51ee4441d9a2b6efc78e3d55181c98295b6bc/lib/fakes3/server.rb#L517-L546
+
+      @ssl_cert_path = ssl_cert_path
+      @ssl_key_path = ssl_key_path
+      @extra_options = extra_options.select{|k| %i!quiet!.include?(k)}
     end
 
     def serve
-      @server = WEBrick::HTTPServer.new(:BindAddress => @address, :Port => @port)
+      webrick_config = {
+        :BindAddress => @address,
+        :Port => @port
+      }
+
+      # SSL and logger implementation taken from
+      # https://github.com/jubos/fake-s3/blob/e4b51ee4441d9a2b6efc78e3d55181c98295b6bc/lib/fakes3/server.rb#L517-L546
+
+      unless @ssl_cert_path.nil? or @ssl_key_path.nil?
+        webrick_config.merge!(
+          :SSLEnable => true,
+          :SSLCertificate => OpenSSL::X509::Certificate.new(File.read(@ssl_cert_path)),
+          :SSLPrivateKey => OpenSSL::PKey::RSA.new(File.read(@ssl_key_path))
+        )
+      end
+
+      if @extra_options[:quiet]
+        webrick_config.merge!(
+          :Logger => WEBrick::Log.new('/dev/null'),
+          :AccessLog => []
+        )
+      end
+
+      @server = WEBrick::HTTPServer.new(webrick_config)
       @server.mount "/", Servlet, @store,@hostname
       trap "INT" do @server.shutdown end
       @server.start
